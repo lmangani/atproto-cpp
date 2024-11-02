@@ -6,7 +6,7 @@ WIP ATProto lib for bsky.
 
 ### Status
 
-- Prototype, Incomplete
+- Prototype, Untested
 
 ### Credits
 
