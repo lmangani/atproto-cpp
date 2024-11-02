@@ -1,5 +1,7 @@
 # atproto-cpp
 
+[![CMake on multiple platforms](https://github.com/lmangani/atproto-cpp/actions/workflows/cmake-test.yml/badge.svg)](https://github.com/lmangani/atproto-cpp/actions/workflows/cmake-test.yml)
+
 WIP ATProto lib for bsky.
 
 ### Status
