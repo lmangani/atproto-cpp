@@ -34,6 +34,8 @@ add_library(bluesky-client
 target_include_directories(bluesky-client
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/cpp-httplib
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/yyjson/src/
     PRIVATE
         ${OPENSSL_INCLUDE_DIR}
 )
