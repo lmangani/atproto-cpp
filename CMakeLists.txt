@@ -68,6 +68,9 @@ target_link_libraries(bluesky-client
 add_executable(bluesky-example
     examples/main.cpp
 )
+add_executable(bluesky-post
+    examples/post.cpp
+)
 
 target_link_libraries(bluesky-example
     PRIVATE
