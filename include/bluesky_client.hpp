@@ -3,43 +3,56 @@
 #include <string>
 #include <map>
 #include <vector>
+#include <memory>
 #include <httplib.h>
 #include <yyjson.h>
 
 class BlueskyClient {
 public:
-    BlueskyClient(const std::string& server = "bsky.social");
-    ~BlueskyClient() = default;
+    explicit BlueskyClient(const std::string& server = "bsky.social");
+    ~BlueskyClient();
+
+    // Disable copying
+    BlueskyClient(const BlueskyClient&) = delete;
+    BlueskyClient& operator=(const BlueskyClient&) = delete;
+
+    // Enable moving
+    BlueskyClient(BlueskyClient&&);
+    BlueskyClient& operator=(BlueskyClient&&);
 
     // Core functionality
-    bool login(const std::string& username, const std::string& password);
+    bool login(const std::string& identifier, const std::string& password);
+    bool createPost(const std::string& message);
     std::map<std::string, std::string> getPopularPosts(int limit = 1);
     int getUnreadCount();
 
     // Helper functions
     static std::string filterText(const std::string& str);
     static std::vector<std::string> splitIntoWords(const std::string& str);
-    
-    // Status checks
-    bool isLoggedIn() const { return !accessToken.empty(); }
-    std::string getHandle() const { return userHandle; }
+    static std::string urlEncode(const std::string& str);
+    static std::string createJsonString(const std::map<std::string, std::string>& data);
+
+    // Status checks and getters
+    bool isLoggedIn() const { return !access_token_.empty(); }
+    const std::string& getHandle() const { return user_handle_; }
+    const std::string& getDid() const { return user_did_; }
 
 private:
     // HTTP request helpers
-    std::string makeRequest(const std::string& method,
-                           const std::string& endpoint,
-                           const std::map<std::string, std::string>& params = {},
-                           const std::string& body = "");
-    
-    std::string buildUrl(const std::string& endpoint);
-    std::string urlEncode(const std::string& str);
-    
+    std::string makeRequest(
+        const std::string& method,
+        const std::string& endpoint,
+        const std::map<std::string, std::string>& params = std::map<std::string, std::string>(),
+        const std::string& body = std::string()
+    );
+
     // Member variables
-    httplib::SSLClient* client;
-    std::string serverHost;
-    std::string accessToken;
-    std::string userDid;
-    std::string userHandle;
+    std::unique_ptr<httplib::SSLClient> client_;
+    std::string server_host_;
+    std::string access_token_;
+    std::string user_did_;
+    std::string user_handle_;
+    std::string refresh_token_;
     
-    const std::string USER_AGENT = "BlueskyClient/1.0";
+    static const char* const USER_AGENT;
 };
