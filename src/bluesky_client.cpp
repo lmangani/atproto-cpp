@@ -1,25 +1,68 @@
 #include "bluesky_client.hpp"
-#include <algorithm>
 #include <sstream>
-#include <iostream>
 #include <iomanip>
+#include <algorithm>
+#include <ctime>
 
-BlueskyClient::BlueskyClient(const std::string& server) : serverHost(server) {
-    client = new httplib::SSLClient(serverHost);
-    client->set_connection_timeout(10);
-    client->set_read_timeout(10);
-    client->enable_server_certificate_verification(false);
+const char* const BlueskyClient::USER_AGENT = "BlueskyClient/1.0";
+
+BlueskyClient::BlueskyClient(const std::string& server) 
+    : server_host_(server)
+    , client_(new httplib::SSLClient(server_host_)) {
+    
+    client_->set_connection_timeout(10);
+    client_->set_read_timeout(10);
+    client_->enable_server_certificate_verification(false);
 }
 
-bool BlueskyClient::login(const std::string& username, const std::string& password) {
-    // Prepare login payload
+BlueskyClient::~BlueskyClient() = default;
+
+BlueskyClient::BlueskyClient(BlueskyClient&& other)
+    : client_(std::move(other.client_))
+    , server_host_(std::move(other.server_host_))
+    , access_token_(std::move(other.access_token_))
+    , user_did_(std::move(other.user_did_))
+    , user_handle_(std::move(other.user_handle_))
+    , refresh_token_(std::move(other.refresh_token_)) {}
+
+BlueskyClient& BlueskyClient::operator=(BlueskyClient&& other) {
+    if (this != &other) {
+        client_ = std::move(other.client_);
+        server_host_ = std::move(other.server_host_);
+        access_token_ = std::move(other.access_token_);
+        user_did_ = std::move(other.user_did_);
+        user_handle_ = std::move(other.user_handle_);
+        refresh_token_ = std::move(other.refresh_token_);
+    }
+    return *this;
+}
+
+std::string BlueskyClient::createJsonString(const std::map<std::string, std::string>& data) {
     std::stringstream ss;
-    ss << "{\"identifier\":\"" << username << "\",\"password\":\"" << password << "\"}";
+    ss << "{";
+    bool first = true;
+    for (const auto& pair : data) {
+        if (!first) {
+            ss << ",";
+        }
+        ss << "\"" << pair.first << "\":\"" << pair.second << "\"";
+        first = false;
+    }
+    ss << "}";
+    return ss.str();
+}
+
+bool BlueskyClient::login(const std::string& identifier, const std::string& password) {
+    std::map<std::string, std::string> loginData = {
+        {"identifier", identifier},
+        {"password", password}
+    };
     
-    auto response = makeRequest("POST", "xrpc/com.atproto.server.createSession", {}, ss.str());
+    auto response = makeRequest("POST", "xrpc/com.atproto.server.createSession", 
+                              std::map<std::string, std::string>(), 
+                              createJsonString(loginData));
     
     if (!response.empty()) {
-        // Parse response using yyjson
         yyjson_doc* doc = yyjson_read(response.c_str(), response.length(), 0);
         if (!doc) return false;
         
@@ -29,21 +72,50 @@ bool BlueskyClient::login(const std::string& username, const std::string& passwo
             return false;
         }
 
-        // Extract values
         yyjson_val* jwt = yyjson_obj_get(root, "accessJwt");
         yyjson_val* did = yyjson_obj_get(root, "did");
         yyjson_val* handle = yyjson_obj_get(root, "handle");
+        yyjson_val* refresh = yyjson_obj_get(root, "refreshJwt");
 
         if (jwt && did && handle) {
-            accessToken = "Bearer " + std::string(yyjson_get_str(jwt));
-            userDid = yyjson_get_str(did);
-            userHandle = yyjson_get_str(handle);
+            access_token_ = "Bearer " + std::string(yyjson_get_str(jwt));
+            user_did_ = yyjson_get_str(did);
+            user_handle_ = yyjson_get_str(handle);
+            if (refresh) {
+                refresh_token_ = yyjson_get_str(refresh);
+            }
             yyjson_doc_free(doc);
             return true;
         }
         yyjson_doc_free(doc);
     }
     return false;
+}
+
+bool BlueskyClient::createPost(const std::string& message) {
+    if (!isLoggedIn() || message.empty()) {
+        return false;
+    }
+    
+    // Get current time in ISO 8601 format
+    time_t now;
+    time(&now);
+    char timestamp[32];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+    
+    std::stringstream ss;
+    ss << "{\"collection\":\"app.bsky.feed.post\",\"repo\":\"" 
+       << user_did_ 
+       << "\",\"record\":{\"text\":\"" 
+       << message 
+       << "\",\"createdAt\":\"" 
+       << timestamp 
+       << "\"}}";
+    
+    auto response = makeRequest("POST", "xrpc/com.atproto.repo.createRecord", 
+                              std::map<std::string, std::string>(), 
+                              ss.str());
+    return !response.empty();
 }
 
 std::map<std::string, std::string> BlueskyClient::getPopularPosts(int limit) {
@@ -103,17 +175,19 @@ int BlueskyClient::getUnreadCount() {
     return -1;
 }
 
-std::string BlueskyClient::makeRequest(const std::string& method,
-                                     const std::string& endpoint,
-                                     const std::map<std::string, std::string>& params,
-                                     const std::string& body) {
+std::string BlueskyClient::makeRequest(
+    const std::string& method,
+    const std::string& endpoint,
+    const std::map<std::string, std::string>& params,
+    const std::string& body
+) {
     httplib::Headers headers = {
         {"User-Agent", USER_AGENT},
         {"Content-Type", "application/json"}
     };
     
-    if (!accessToken.empty()) {
-        headers.emplace("Authorization", accessToken);
+    if (!access_token_.empty()) {
+        headers.emplace("Authorization", access_token_);
     }
 
     std::string url = endpoint;
@@ -129,9 +203,9 @@ std::string BlueskyClient::makeRequest(const std::string& method,
 
     httplib::Result response;
     if (method == "POST") {
-        response = client->Post(url.c_str(), headers, body, "application/json");
+        response = client_->Post(url.c_str(), headers, body, "application/json");
     } else {
-        response = client->Get(url.c_str(), headers);
+        response = client_->Get(url.c_str(), headers);
     }
 
     if (response && response->status == 200) {
@@ -144,13 +218,11 @@ std::string BlueskyClient::makeRequest(const std::string& method,
 std::string BlueskyClient::filterText(const std::string& str) {
     std::string out = str;
     
-    // Define the replacements using hex values for Unicode characters
     struct CharReplacement {
         const char* from;
         char to;
     };
     
-    // List of common Unicode characters to replace
     static const CharReplacement replacements[] = {
         {"\u2018", '\''}, // Left single quote
         {"\u2019", '\''}, // Right single quote
@@ -158,7 +230,6 @@ std::string BlueskyClient::filterText(const std::string& str) {
         {"\u201D", '"'},  // Right double quote
     };
     
-    // Replace Unicode characters with ASCII equivalents
     for (const auto& rep : replacements) {
         size_t pos = 0;
         while ((pos = out.find(rep.from, pos)) != std::string::npos) {
@@ -167,7 +238,6 @@ std::string BlueskyClient::filterText(const std::string& str) {
         }
     }
     
-    // Remove non-ASCII characters
     out.erase(std::remove_if(out.begin(), out.end(),
         [](unsigned char ch) { return (ch < 32) || (ch > 126); }), out.end());
     
