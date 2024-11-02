@@ -50,23 +50,25 @@ target_link_libraries(bluesky-client
         Threads::Threads
 )
 
-# Add example executable
-add_executable(bluesky-example
-    examples/main.cpp
-)
-
-add_executable(bluesky-post
-    examples/post.cpp
-)
-
+add_executable(bluesky-example examples/main.cpp)
+add_executable(bluesky-post examples/post.cpp)
 target_link_libraries(bluesky-example
     PRIVATE
         bluesky-client
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        httplib::httplib
+        yyjson
+        Threads::Threads
 )
-
 target_link_libraries(bluesky-post
     PRIVATE
         bluesky-client
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        httplib::httplib
+        yyjson
+        Threads::Threads
 )
 
 # Testing configuration
