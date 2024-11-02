@@ -1,4 +1,3 @@
-# CMakeLists.txt
 cmake_minimum_required(VERSION 3.14)
 project(bluesky-client VERSION 0.1.0 LANGUAGES CXX)
 
@@ -14,32 +13,17 @@ option(BUILD_TESTS "Build test cases" OFF)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
-# Include FetchContent for downloading dependencies
-include(FetchContent)
+# Add cpp-httplib
+add_library(httplib INTERFACE)
+target_include_directories(httplib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external/cpp-httplib)
+target_compile_definitions(httplib INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT)
+add_library(httplib::httplib ALIAS httplib)
 
-# Fetch cpp-httplib
-FetchContent_Declare(
-    httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG v0.14.1
-)
-FetchContent_MakeAvailable(httplib)
-
-# Fetch and build yyjson
-FetchContent_Declare(
-    yyjson
-    GIT_REPOSITORY https://github.com/ibireme/yyjson.git
-    GIT_TAG 0.8.0
-)
-FetchContent_GetProperties(yyjson)
-if(NOT yyjson_POPULATED)
-    FetchContent_Populate(yyjson)
-    # Build yyjson as static library
-    set(YYJSON_BUILD_MISC OFF CACHE BOOL "" FORCE)
-    set(YYJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(YYJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    add_subdirectory(${yyjson_SOURCE_DIR} ${yyjson_BINARY_DIR})
-endif()
+# Build yyjson
+set(YYJSON_BUILD_MISC OFF CACHE BOOL "" FORCE)
+set(YYJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YYJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/yyjson)
 
 # Add library target
 add_library(bluesky-client
@@ -68,6 +52,7 @@ target_link_libraries(bluesky-client
 add_executable(bluesky-example
     examples/main.cpp
 )
+
 add_executable(bluesky-post
     examples/post.cpp
 )
@@ -77,12 +62,18 @@ target_link_libraries(bluesky-example
         bluesky-client
 )
 
+target_link_libraries(bluesky-post
+    PRIVATE
+        bluesky-client
+)
+
 # Testing configuration
 if(BUILD_TESTS)
     # Enable testing
     enable_testing()
     
-    # Fetch Google Test
+    # Include Google Test
+    include(FetchContent)
     FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
