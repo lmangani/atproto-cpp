@@ -33,9 +33,9 @@ public:
     static std::string createJsonString(const std::map<std::string, std::string>& data);
 
     // Status checks and getters
-    bool isLoggedIn() const { return !access_token_.empty(); }
-    const std::string& getHandle() const { return user_handle_; }
-    const std::string& getDid() const { return user_did_; }
+    bool isLoggedIn() const { return !m_access_token.empty(); }
+    const std::string& getHandle() const { return m_user_handle; }
+    const std::string& getDid() const { return m_user_did; }
 
 private:
     enum RequestMethod {
@@ -55,12 +55,12 @@ private:
     );
 
     // Member variables
-    std::unique_ptr<httplib::SSLClient> client_;
-    std::string server_host_;
-    std::string access_token_;
-    std::string user_did_;
-    std::string user_handle_;
-    std::string refresh_token_;
+    std::unique_ptr<httplib::Client> m_client;
+    std::string m_server_host;
+    std::string m_access_token;
+    std::string m_user_did;
+    std::string m_user_handle;
+    std::string m_refresh_token;
     
     static const char* const USER_AGENT;
 };
