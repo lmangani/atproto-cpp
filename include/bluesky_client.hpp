@@ -20,10 +20,47 @@ public:
     BlueskyClient(BlueskyClient&&);
     BlueskyClient& operator=(BlueskyClient&&);
 
-    // Core functionality
+    enum Error {
+        Error_None = 0, // No error
+        Error_NotLoggedIn, // Not logged in
+        Error_ResponseParseFail, // Failed to parse response JSON
+        Error_ResponseFail, // Response was empty or code was not 200
+        Error_BadInput, // Bad user input
+    };
+
     bool login(const std::string& identifier, const std::string& password);
     bool createPost(const std::string& message);
     std::map<std::string, std::string> getPopularPosts(int limit = 1);
+    struct PostAuthor {
+        std::string did;
+        time_t createdAt;
+
+        std::string handle;
+        std::string displayName;
+
+        std::string avatarUrl;
+
+        bool blockedByViewer, mutedByViewer;
+    };
+
+    struct Post {
+        std::string uri;
+        time_t indexedAt;
+        time_t createdAt;
+
+        PostAuthor author;
+
+        std::string cid;
+
+        std::string text;
+        
+        unsigned int likeCount, quoteCount, replyCount, repostCount;
+    };
+
+    struct PostsResult {
+        std::vector<Post> posts;
+        Error error;
+    };
     int getUnreadCount();
 
     // Helper functions
