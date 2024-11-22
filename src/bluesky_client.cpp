@@ -58,9 +58,11 @@ bool BlueskyClient::login(const std::string& identifier, const std::string& pass
         {"password", password}
     };
     
-    auto response = makeRequest("POST", "xrpc/com.atproto.server.createSession", 
-                              std::map<std::string, std::string>(), 
-                              createJsonString(loginData));
+    auto response = makeRequest(
+        RequestMethod_POST, "xrpc/com.atproto.server.createSession", 
+        std::map<std::string, std::string>(), 
+        createJsonString(loginData)
+    );
     
     if (!response.empty()) {
         yyjson_doc* doc = yyjson_read(response.c_str(), response.length(), 0);
@@ -112,9 +114,12 @@ bool BlueskyClient::createPost(const std::string& message) {
        << timestamp 
        << "\"}}";
     
-    auto response = makeRequest("POST", "xrpc/com.atproto.repo.createRecord", 
-                              std::map<std::string, std::string>(), 
-                              ss.str());
+    auto response = makeRequest(
+        RequestMethod_POST, "xrpc/com.atproto.repo.createRecord", 
+        std::map<std::string, std::string>(), 
+        ss.str()
+    );
+
     return !response.empty();
 }
 
@@ -159,7 +164,7 @@ std::map<std::string, std::string> BlueskyClient::getPopularPosts(int limit) {
 int BlueskyClient::getUnreadCount() {
     if (!isLoggedIn()) return -1;
 
-    auto response = makeRequest("GET", "xrpc/app.bsky.notification.getUnreadCount");
+    auto response = makeRequest(RequestMethod_GET, "xrpc/app.bsky.notification.getUnreadCount");
     
     if (!response.empty()) {
         yyjson_doc* doc = yyjson_read(response.c_str(), response.length(), 0);
@@ -176,39 +181,54 @@ int BlueskyClient::getUnreadCount() {
 }
 
 std::string BlueskyClient::makeRequest(
-    const std::string& method,
+    RequestMethod method,
     const std::string& endpoint,
     const std::map<std::string, std::string>& params,
     const std::string& body
 ) {
+    if (method >= RequestMethod_Max)
+        return "";
+
     httplib::Headers headers = {
-        {"User-Agent", USER_AGENT},
-        {"Content-Type", "application/json"}
+        { "User-Agent", USER_AGENT },
+        { "Content-Type", "application/json" }
     };
     
-    if (!access_token_.empty()) {
-        headers.emplace("Authorization", access_token_);
-    }
+    if (!m_access_token.empty())
+        headers.emplace("Authorization", m_access_token);
 
-    std::string url = endpoint;
+    std::ostringstream sstream;
+
+    sstream << '/' << endpoint;
+
     if (!params.empty()) {
-        url += "?";
-        bool first = true;
-        for (const auto& param : params) {
-            if (!first) url += "&";
-            url += urlEncode(param.first) + "=" + urlEncode(param.second);
-            first = false;
+        sstream << '?';
+
+        for (auto it = params.begin(); it != params.end(); it++) {
+            if (it != params.begin())
+                sstream << '&';
+
+            sstream << urlEncode(it->first) << '=' << urlEncode(it->second);
         }
     }
 
     httplib::Result response;
-    if (method == "POST") {
-        response = client_->Post(url.c_str(), headers, body, "application/json");
-    } else {
-        response = client_->Get(url.c_str(), headers);
+    switch (method) {
+    case RequestMethod_GET:
+        response = m_client->Get(sstream.str(), headers);
+        break;
+    case RequestMethod_POST:
+        response = m_client->Post(sstream.str(), headers, body, "application/json");
+        break;
+    case RequestMethod_DELETE:
+        response = m_client->Delete(sstream.str(), headers, body, "application/json");
+        break;
+    
+    default:
+        return "";
     }
 
-    if (response && response->status == 200) {
+    if (response && response->status == 200)
         return response->body;
     }
     

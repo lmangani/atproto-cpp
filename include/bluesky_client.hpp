@@ -38,9 +38,17 @@ public:
     const std::string& getDid() const { return user_did_; }
 
 private:
+    enum RequestMethod {
+        RequestMethod_GET = 0,
+        RequestMethod_POST,
+        RequestMethod_DELETE,
+
+        RequestMethod_Max
+    };
+
     // HTTP request helpers
     std::string makeRequest(
-        const std::string& method,
+        RequestMethod method,
         const std::string& endpoint,
         const std::map<std::string, std::string>& params = std::map<std::string, std::string>(),
         const std::string& body = std::string()
