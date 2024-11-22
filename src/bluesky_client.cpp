@@ -59,16 +59,17 @@ static std::string escapeJson(const std::string& str) {
 }
 
 static time_t datetimeToTimeT(const char* datetime) {
-    if (datetime == NULL)
-        return 0;
+    if (datetime == nullptr)
+        return (time_t)(-1);
 
-    struct tm tm = {0};
+    struct tm tm {};
 
-    char formattedDatetime[20];
-    strncpy(formattedDatetime, datetime, 19);
-    formattedDatetime[19] = '\0';
+    char formattedDatetime[32];
+    strncpy(formattedDatetime, datetime, sizeof(formattedDatetime) - 1);
+    formattedDatetime[sizeof(formattedDatetime) - 1] = '\0';
 
-    strptime(formattedDatetime, "%Y-%m-%dT%H:%M:%S", &tm);
+    if (strptime(formattedDatetime, "%Y-%m-%dT%H:%M:%S", &tm) == nullptr)
+        return (time_t)(-1);
 
     return timegm(&tm);
 }
