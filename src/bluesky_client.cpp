@@ -7,32 +7,34 @@
 const char* const BlueskyClient::USER_AGENT = "BlueskyClient/1.0";
 
 BlueskyClient::BlueskyClient(const std::string& server) 
-    : server_host_(server)
-    , client_(new httplib::SSLClient(server_host_)) {
-    
-    client_->set_connection_timeout(10);
-    client_->set_read_timeout(10);
-    client_->enable_server_certificate_verification(false);
+    : m_server_host(server)
+    , m_client(new httplib::Client("https://" + server))
+{
+    m_client->set_connection_timeout(10);
+    m_client->set_read_timeout(10);
+    m_client->enable_server_certificate_verification(false);
+    m_client->set_follow_location(true);
 }
 
 BlueskyClient::~BlueskyClient() = default;
 
 BlueskyClient::BlueskyClient(BlueskyClient&& other)
-    : client_(std::move(other.client_))
-    , server_host_(std::move(other.server_host_))
-    , access_token_(std::move(other.access_token_))
-    , user_did_(std::move(other.user_did_))
-    , user_handle_(std::move(other.user_handle_))
-    , refresh_token_(std::move(other.refresh_token_)) {}
+    : m_client(std::move(other.m_client))
+    , m_server_host(std::move(other.m_server_host))
+    , m_access_token(std::move(other.m_access_token))
+    , m_user_did(std::move(other.m_user_did))
+    , m_user_handle(std::move(other.m_user_handle))
+    , m_refresh_token(std::move(other.m_refresh_token))
+{}
 
 BlueskyClient& BlueskyClient::operator=(BlueskyClient&& other) {
     if (this != &other) {
-        client_ = std::move(other.client_);
-        server_host_ = std::move(other.server_host_);
-        access_token_ = std::move(other.access_token_);
-        user_did_ = std::move(other.user_did_);
-        user_handle_ = std::move(other.user_handle_);
-        refresh_token_ = std::move(other.refresh_token_);
+        m_client = std::move(other.m_client);
+        m_server_host = std::move(other.m_server_host);
+        m_access_token = std::move(other.m_access_token);
+        m_user_did = std::move(other.m_user_did);
+        m_user_handle = std::move(other.m_user_handle);
+        m_refresh_token = std::move(other.m_refresh_token);
     }
     return *this;
 }
@@ -54,8 +56,8 @@ std::string BlueskyClient::createJsonString(const std::map<std::string, std::str
 
 bool BlueskyClient::login(const std::string& identifier, const std::string& password) {
     std::map<std::string, std::string> loginData = {
-        {"identifier", identifier},
-        {"password", password}
+        { "identifier", identifier },
+        { "password", password }
     };
     
     auto response = makeRequest(
@@ -66,7 +68,8 @@ bool BlueskyClient::login(const std::string& identifier, const std::string& pass
     
     if (!response.empty()) {
         yyjson_doc* doc = yyjson_read(response.c_str(), response.length(), 0);
-        if (!doc) return false;
+        if (!doc)
+            return false;
         
         yyjson_val* root = yyjson_doc_get_root(doc);
         if (!root) {
@@ -80,17 +83,19 @@ bool BlueskyClient::login(const std::string& identifier, const std::string& pass
         yyjson_val* refresh = yyjson_obj_get(root, "refreshJwt");
 
         if (jwt && did && handle) {
-            access_token_ = "Bearer " + std::string(yyjson_get_str(jwt));
-            user_did_ = yyjson_get_str(did);
-            user_handle_ = yyjson_get_str(handle);
-            if (refresh) {
-                refresh_token_ = yyjson_get_str(refresh);
-            }
+            m_access_token = std::string("Bearer ") + yyjson_get_str(jwt);
+            m_user_did = yyjson_get_str(did);
+            m_user_handle = yyjson_get_str(handle);
+            if (refresh)
+                m_refresh_token = yyjson_get_str(refresh);
+
             yyjson_doc_free(doc);
             return true;
         }
+
         yyjson_doc_free(doc);
     }
+
     return false;
 }
 
