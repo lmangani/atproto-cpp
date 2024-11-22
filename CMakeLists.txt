@@ -50,7 +50,7 @@ target_link_libraries(bluesky-client
         Threads::Threads
 )
 
-add_executable(bluesky-example examples/main.cpp)
+add_executable(bluesky-example examples/basic.cpp)
 add_executable(bluesky-post examples/post.cpp)
 target_link_libraries(bluesky-example
     PRIVATE
