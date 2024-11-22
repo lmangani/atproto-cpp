@@ -39,18 +39,52 @@ BlueskyClient& BlueskyClient::operator=(BlueskyClient&& other) {
     return *this;
 }
 
-std::string BlueskyClient::createJsonString(const std::map<std::string, std::string>& data) {
-    std::stringstream ss;
-    ss << "{";
-    bool first = true;
-    for (const auto& pair : data) {
-        if (!first) {
-            ss << ",";
+static std::string escapeJson(const std::string& str) {
+    std::string escaped;
+    escaped.reserve(str.size());
+
+    for (char c : str) {
+        switch (c) {
+            case '\"': escaped.append("\\\""); break;
+            case '\\': escaped.append("\\\\"); break;
+            case '\b': escaped.append("\\b"); break;
+            case '\f': escaped.append("\\f"); break;
+            case '\n': escaped.append("\\n"); break;
+            case '\r': escaped.append("\\r"); break;
+            case '\t': escaped.append("\\t"); break;
+            default: escaped.push_back(c); break;
         }
-        ss << "\"" << pair.first << "\":\"" << pair.second << "\"";
-        first = false;
+    }
+    return escaped;
+}
+
+static time_t datetimeToTimeT(const char* datetime) {
+    if (datetime == NULL)
+        return 0;
+
+    struct tm tm = {0};
+
+    char formattedDatetime[20];
+    strncpy(formattedDatetime, datetime, 19);
+    formattedDatetime[19] = '\0';
+
+    strptime(formattedDatetime, "%Y-%m-%dT%H:%M:%S", &tm);
+
+    return timegm(&tm);
+}
+
+std::string BlueskyClient::createJsonString(const std::map<std::string, std::string>& data) {
+    std::ostringstream ss;
+
+    ss << "{";
+    for (auto it = data.begin(); it != data.end(); it++) {
+        if (it != data.begin())
+            ss << ',';
+
+        ss << "\"" << escapeJson(it->first) << "\":\"" << escapeJson(it->second) << "\"";
     }
     ss << "}";
+
     return ss.str();
 }
 
@@ -241,62 +275,54 @@ std::string BlueskyClient::makeRequest(
 }
 
 std::string BlueskyClient::filterText(const std::string& str) {
-    std::string out = str;
-    
-    struct CharReplacement {
-        const char* from;
-        char to;
+    static const std::unordered_map<wchar_t, char> replacements = {
+        { L'\u2018', '\'' }, // Left single quote
+        { L'\u2019', '\'' }, // Right single quote
+        { L'\u201C', '"'  }, // Left double quote
+        { L'\u201D', '"'  }  // Right double quote
     };
-    
-    static const CharReplacement replacements[] = {
-        {"\u2018", '\''}, // Left single quote
-        {"\u2019", '\''}, // Right single quote
-        {"\u201C", '"'},  // Left double quote
-        {"\u201D", '"'},  // Right double quote
-    };
-    
-    for (const auto& rep : replacements) {
-        size_t pos = 0;
-        while ((pos = out.find(rep.from, pos)) != std::string::npos) {
-            out.replace(pos, strlen(rep.from), 1, rep.to);
-            pos += 1;
-        }
+
+    std::string out;
+    out.reserve(str.size());
+
+    for (char c : str) {
+        auto it = replacements.find(c);
+        if (it != replacements.end())
+            out.push_back(it->second);
+        else if (c >= 32 && c <= 126) // Only keep printable ASCII
+            out.push_back(c);
     }
-    
-    out.erase(std::remove_if(out.begin(), out.end(),
-        [](unsigned char ch) { return (ch < 32) || (ch > 126); }), out.end());
-    
+
     return out;
 }
 
 std::vector<std::string> BlueskyClient::splitIntoWords(const std::string& str) {
     std::vector<std::string> words;
-    std::stringstream ss(str);
+    std::istringstream ss(str);
+
     std::string word;
-    
     while (ss >> word) {
-        if (!word.empty()) {
+        if (!word.empty())
             words.push_back(word);
-        }
     }
     
     return words;
 }
 
 std::string BlueskyClient::urlEncode(const std::string& str) {
-    std::ostringstream escaped;
-    escaped.fill('0');
-    escaped << std::hex;
+    std::string escaped;
 
-    for (char c : str) {
-        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            escaped << c;
-        } else if (c == ' ') {
-            escaped << '+';
-        } else {
-            escaped << '%' << std::setw(2) << int((unsigned char)c);
+    for (unsigned char c : str) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+            escaped += c;
+        else if (c == ' ')
+            escaped += '+';
+        else {
+            escaped += '%';
+            escaped += "0123456789ABCDEF"[c / 16];
+            escaped += "0123456789ABCDEF"[c % 16];
         }
     }
 
-    return escaped.str();
+    return escaped;
 }
