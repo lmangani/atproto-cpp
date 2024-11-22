@@ -1,8 +1,13 @@
 #include "bluesky_client.hpp"
+
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
 #include <ctime>
+#include <unordered_map>
+#include <string>
+
+#include <yyjson.h>
 
 const char* const BlueskyClient::USER_AGENT = "BlueskyClient/1.0";
 
@@ -134,22 +139,23 @@ bool BlueskyClient::login(const std::string& identifier, const std::string& pass
     return false;
 }
 
-bool BlueskyClient::createPost(const std::string& message) {
-    if (!isLoggedIn() || message.empty()) {
-        return false;
-    }
+BlueskyClient::Error BlueskyClient::createPost(const std::string& text) {
+    if (!isLoggedIn())
+        return Error_NotLoggedIn;
+    if (text.empty())
+        return Error_BadInput;
     
     // Get current time in ISO 8601 format
-    time_t now;
-    time(&now);
+    time_t now; time(&now);
+
     char timestamp[32];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
     
     std::stringstream ss;
     ss << "{\"collection\":\"app.bsky.feed.post\",\"repo\":\"" 
-       << user_did_ 
+       << m_user_did 
        << "\",\"record\":{\"text\":\"" 
-       << message 
+       << text 
        << "\",\"createdAt\":\"" 
        << timestamp 
        << "\"}}";
@@ -160,63 +166,186 @@ bool BlueskyClient::createPost(const std::string& message) {
         ss.str()
     );
 
-    return !response.empty();
+    if (response.empty())
+        return Error_ResponseFail;
+    
+    return Error_None;
 }
 
-std::map<std::string, std::string> BlueskyClient::getPopularPosts(int limit) {
-    std::map<std::string, std::string> result;
+BlueskyClient::PostsResult BlueskyClient::getFeedPosts(const std::string& feedUri, int limit) {
+    PostsResult result { .error = Error_None };
     if (!isLoggedIn()) {
-        result["error"] = "Not logged in";
+        result.error = Error_NotLoggedIn;
         return result;
     }
 
-    std::map<std::string, std::string> params = {{"limit", std::to_string(limit)}};
-    auto response = makeRequest("GET", "xrpc/app.bsky.unspecced.getPopular", params);
+    std::map<std::string, std::string> params = {
+        { "feed", feedUri },
+        { "limit", std::to_string(limit) }
+    };
+    auto response = makeRequest(RequestMethod_GET, "xrpc/app.bsky.feed.getFeed", params);
 
     if (!response.empty()) {
         yyjson_doc* doc = yyjson_read(response.c_str(), response.length(), 0);
         if (!doc) {
-            result["error"] = "Failed to parse response";
+            result.error = Error_ResponseParseFail;
             return result;
         }
 
         yyjson_val* root = yyjson_doc_get_root(doc);
         yyjson_val* feed = yyjson_obj_get(root, "feed");
-        if (feed && yyjson_arr_size(feed) > 0) {
-            yyjson_val* first_post = yyjson_arr_get(feed, 0);
-            yyjson_val* post = yyjson_obj_get(first_post, "post");
-            yyjson_val* author = yyjson_obj_get(post, "author");
-            yyjson_val* record = yyjson_obj_get(post, "record");
 
-            result["handle"] = yyjson_get_str(yyjson_obj_get(author, "handle"));
-            result["name"] = yyjson_get_str(yyjson_obj_get(author, "displayName"));
-            result["date"] = yyjson_get_str(yyjson_obj_get(record, "createdAt"));
-            result["text"] = yyjson_get_str(yyjson_obj_get(record, "text"));
-            result["error"] = "";
+        unsigned postCount = yyjson_arr_size(feed);
+
+        if (feed && postCount > 0) {
+            result.posts.resize(postCount);
+
+            for (unsigned i = 0; i < postCount; i++) {
+                yyjson_val* arrEntry = yyjson_arr_get(feed, i);
+
+                auto& outPost = result.posts[i];
+
+                yyjson_val* post = yyjson_obj_get(arrEntry, "post");
+
+                outPost.uri = yyjson_get_str(yyjson_obj_get(post, "uri"));
+                outPost.cid = yyjson_get_str(yyjson_obj_get(post, "cid"));
+
+                outPost.replyCount = yyjson_get_uint(yyjson_obj_get(post, "replyCount"));
+                outPost.repostCount = yyjson_get_uint(yyjson_obj_get(post, "repostCount"));
+                outPost.likeCount = yyjson_get_uint(yyjson_obj_get(post, "likeCount"));
+                outPost.quoteCount = yyjson_get_uint(yyjson_obj_get(post, "quoteCount"));
+
+                outPost.indexedAt = datetimeToTimeT(yyjson_get_str(yyjson_obj_get(post, "indexedAt")));
+            
+                yyjson_val* record = yyjson_obj_get(post, "record");
+
+                outPost.createdAt = datetimeToTimeT(yyjson_get_str(yyjson_obj_get(record, "createdAt")));
+
+                outPost.text = yyjson_get_str(yyjson_obj_get(record, "text"));
+
+                yyjson_val* author = yyjson_obj_get(post, "author");
+
+                outPost.author.did = yyjson_get_str(yyjson_obj_get(author, "did"));
+
+                outPost.author.handle = yyjson_get_str(yyjson_obj_get(author, "handle"));
+
+                const char* displayName = yyjson_get_str(yyjson_obj_get(author, "displayName"));
+                if (displayName)
+                    outPost.author.displayName = displayName;
+
+                const char* avatarUrl = yyjson_get_str(yyjson_obj_get(author, "avatar"));
+                if (avatarUrl)
+                    outPost.author.avatarUrl = avatarUrl;
+
+                outPost.author.createdAt = datetimeToTimeT(yyjson_get_str(yyjson_obj_get(author, "createdAt")));
+            }
         }
         yyjson_doc_free(doc);
-    } else {
-        result["error"] = "No data received";
     }
+    else
+        result.error = Error_ResponseFail;
+
     return result;
 }
 
+BlueskyClient::PostsResult BlueskyClient::getAuthorPosts(const std::string& atId, int limit) {
+    PostsResult result { .error = Error_None };
+    if (!isLoggedIn()) {
+        result.error = Error_NotLoggedIn;
+        return result;
+    }
+
+    std::map<std::string, std::string> params = {
+        { "actor", atId },
+        { "limit", std::to_string(limit) },
+        { "filter", "posts_no_replies" }
+    };
+    auto response = makeRequest(RequestMethod_GET, "xrpc/app.bsky.feed.getAuthorFeed", params);
+
+    if (!response.empty()) {
+        yyjson_doc* doc = yyjson_read(response.c_str(), response.length(), 0);
+        if (!doc) {
+            result.error = Error_ResponseParseFail;
+            return result;
+        }
+
+        yyjson_val* root = yyjson_doc_get_root(doc);
+        yyjson_val* feed = yyjson_obj_get(root, "feed");
+
+        unsigned postCount = yyjson_arr_size(feed);
+
+        if (feed && postCount > 0) {
+            result.posts.resize(postCount);
+
+            for (unsigned i = 0; i < postCount; i++) {
+                yyjson_val* arrEntry = yyjson_arr_get(feed, i);
+
+                auto& outPost = result.posts[i];
+
+                yyjson_val* post = yyjson_obj_get(arrEntry, "post");
+
+                outPost.uri = yyjson_get_str(yyjson_obj_get(post, "uri"));
+                outPost.cid = yyjson_get_str(yyjson_obj_get(post, "cid"));
+
+                outPost.replyCount = yyjson_get_uint(yyjson_obj_get(post, "replyCount"));
+                outPost.repostCount = yyjson_get_uint(yyjson_obj_get(post, "repostCount"));
+                outPost.likeCount = yyjson_get_uint(yyjson_obj_get(post, "likeCount"));
+                outPost.quoteCount = yyjson_get_uint(yyjson_obj_get(post, "quoteCount"));
+
+                outPost.indexedAt = datetimeToTimeT(yyjson_get_str(yyjson_obj_get(post, "indexedAt")));
+            
+                yyjson_val* record = yyjson_obj_get(post, "record");
+
+                outPost.createdAt = datetimeToTimeT(yyjson_get_str(yyjson_obj_get(record, "createdAt")));
+
+                outPost.text = yyjson_get_str(yyjson_obj_get(record, "text"));
+
+                yyjson_val* author = yyjson_obj_get(post, "author");
+
+                outPost.author.did = yyjson_get_str(yyjson_obj_get(author, "did"));
+
+                outPost.author.handle = yyjson_get_str(yyjson_obj_get(author, "handle"));
+
+                const char* displayName = yyjson_get_str(yyjson_obj_get(author, "displayName"));
+                if (displayName)
+                    outPost.author.displayName = displayName;
+
+                const char* avatarUrl = yyjson_get_str(yyjson_obj_get(author, "avatar"));
+                if (avatarUrl)
+                    outPost.author.avatarUrl = avatarUrl;
+
+                outPost.author.createdAt = datetimeToTimeT(yyjson_get_str(yyjson_obj_get(author, "createdAt")));
+            }
+        }
+        yyjson_doc_free(doc);
+    }
+    else
+        result.error = Error_ResponseFail;
+
+    return result;
+}
+
+
 int BlueskyClient::getUnreadCount() {
-    if (!isLoggedIn()) return -1;
+    if (!isLoggedIn())
+        return -1;
 
     auto response = makeRequest(RequestMethod_GET, "xrpc/app.bsky.notification.getUnreadCount");
     
     if (!response.empty()) {
         yyjson_doc* doc = yyjson_read(response.c_str(), response.length(), 0);
-        if (!doc) return -1;
+        if (!doc)
+            return -1;
 
         yyjson_val* root = yyjson_doc_get_root(doc);
         yyjson_val* count = yyjson_obj_get(root, "count");
         
-        int result = count ? yyjson_get_int(count) : -1;
+        int result = yyjson_get_int(count);
+
         yyjson_doc_free(doc);
         return result;
     }
+
     return -1;
 }
 
@@ -270,8 +399,7 @@ std::string BlueskyClient::makeRequest(
 
     if (response && response->status == 200)
         return response->body;
-    }
-    
+
     return "";
 }
 

@@ -1,11 +1,13 @@
 #pragma once
 
-#include <string>
-#include <map>
 #include <vector>
+#include <map>
+
+#include <string>
+
 #include <memory>
+
 #include <httplib.h>
-#include <yyjson.h>
 
 class BlueskyClient {
 public:
@@ -29,8 +31,7 @@ public:
     };
 
     bool login(const std::string& identifier, const std::string& password);
-    bool createPost(const std::string& message);
-    std::map<std::string, std::string> getPopularPosts(int limit = 1);
+
     struct PostAuthor {
         std::string did;
         time_t createdAt;
@@ -42,6 +43,8 @@ public:
 
         bool blockedByViewer, mutedByViewer;
     };
+    
+    Error createPost(const std::string& text);
 
     struct Post {
         std::string uri;
@@ -61,6 +64,12 @@ public:
         std::vector<Post> posts;
         Error error;
     };
+
+    PostsResult getFeedPosts(const std::string& feedUri, int limit = 1);
+
+    // atId can be either DID or handle
+    PostsResult getAuthorPosts(const std::string& atId, int limit = 1);
+
     int getUnreadCount();
 
     // Helper functions
